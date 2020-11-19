@@ -108,7 +108,7 @@
       <resource>
         <directory>${project.basedir}/../../conf</directory>
         <includes>
-          <include>log4j.properties</include>
+          <include>log4j2.properties</include>
         </includes>
       </resource>
     </resources>
