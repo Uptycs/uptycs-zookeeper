@@ -18,20 +18,22 @@
 
 package org.apache.zookeeper.audit;
 
-
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.LineNumberReader;
-import java.io.StringReader;
+
+import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.log4j.Layout;
-import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
-import org.apache.log4j.SimpleLayout;
-import org.apache.log4j.WriterAppender;
+
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Layout;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.WriterAppender;
+import org.apache.logging.log4j.core.config.AppenderRef;
+import org.apache.logging.log4j.core.config.Configuration;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooDefs;
@@ -41,44 +43,47 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-
-
 public class StandaloneServerAuditTest extends ClientBase {
     private static ByteArrayOutputStream os;
+    private static final String appenderName = "auditAppender";
+    private static LoggerConfig loggerConfig;
 
-    @BeforeClass
-    public static void setup() {
+    @BeforeClass public static void setup() {
         System.setProperty(ZKAuditProvider.AUDIT_ENABLE, "true");
         // setup the logger to capture all the logs
-        Layout layout = new SimpleLayout();
         os = new ByteArrayOutputStream();
-        WriterAppender appender = new WriterAppender(layout, os);
-        appender.setImmediateFlush(true);
-        appender.setThreshold(Level.INFO);
-        Logger zLogger = Logger.getLogger(Log4jAuditLogger.class);
-        zLogger.addAppender(appender);
+        LoggerContext ctx = (LoggerContext) LogManager.getContext(false);
+        Configuration config = ctx.getConfiguration();
+        Layout layout = PatternLayout.newBuilder().withPattern("%-5p - %m%n").build();
+        WriterAppender appender = WriterAppender
+                .createAppender((PatternLayout) layout, null, new OutputStreamWriter(os), appenderName, false, true);
+        appender.start();
+        AppenderRef ref = AppenderRef.createAppenderRef(appenderName, null, null);
+        AppenderRef[] refs = new AppenderRef[] { ref };
+        loggerConfig = LoggerConfig.createLogger(false, Level.INFO, String.valueOf(Log4jAuditLogger.class), "true", refs, null, config, null);
+        loggerConfig.addAppender(appender, null, null);
+        config.addLogger("org.apache.zookeeper.audit.Log4jAuditLogger",loggerConfig);
+        ctx.updateLoggers(config);
     }
 
-    @AfterClass
-    public static void teardown() {
+    @AfterClass public static void teardown() {
         System.clearProperty(ZKAuditProvider.AUDIT_ENABLE);
+        loggerConfig.removeAppender(appenderName);
     }
 
-    @Test
-    public void testCreateAuditLog() throws KeeperException, InterruptedException, IOException {
+    @Test public void testCreateAuditLog() throws KeeperException, InterruptedException, IOException {
         final ZooKeeper zk = createClient();
         String path = "/createPath";
-        zk.create(path, "".getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE,
-                CreateMode.PERSISTENT);
+        zk.create(path, "".getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
         List<String> logs = readAuditLog(os);
+        System.out.println("Audit logs are " + logs);
         assertEquals(1, logs.size());
         assertTrue(logs.get(0).endsWith("operation=create\tznode=/createPath\tznode_type=persistent\tresult=success"));
     }
 
     private static List<String> readAuditLog(ByteArrayOutputStream os) throws IOException {
         List<String> logs = new ArrayList<>();
-        LineNumberReader r = new LineNumberReader(
-                new StringReader(os.toString()));
+        LineNumberReader r = new LineNumberReader(new StringReader(os.toString()));
         String line;
         while ((line = r.readLine()) != null) {
             logs.add(line);
